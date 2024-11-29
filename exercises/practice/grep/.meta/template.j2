@@ -1,9 +1,10 @@
 {%- import "generator_macros.j2" as macros with context -%}
 {{ macros.canonical_ref() }}
 
-import io
+import os
+import pathlib
+import tempfile
 {{ macros.header()}}
-from unittest import mock
 
 {% set filenames = comments | join("\n") | regex_find("[a-z-]*\.txt") -%}
 {% set contents = (comments | join("\n") | regex_split("[a-z-]*\.txt"))[1:] -%}
@@ -14,15 +15,20 @@ FILE_TEXT = {
     {% endfor %}
 }
 
-def open_mock(fname, *args, **kwargs):
-    try:
-        return io.StringIO(FILE_TEXT[fname])
-    except KeyError:
-        raise RuntimeError("Expected one of {0!r}: got {1!r}".format(list(FILE_TEXT.keys()), fname))
-
-@mock.patch("grep.open", name="open", side_effect=open_mock, create=True)
-@mock.patch("io.StringIO", name="StringIO", wraps=io.StringIO)
 class {{ exercise | camel_case }}Test(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        tmpdir_name = self.tmpdir.name
+        for name, content in FILE_TEXT.items():
+            (pathlib.Path(tmpdir_name) / name).write_text(content)
+        self.old_cwd = os.getcwd()
+        os.chdir(tmpdir_name)
+
+    def tearDown(self):
+        os.chdir(self.old_cwd)
+        self.tmpdir.cleanup()
+
 {% set suite_tests = cases -%}
 
 {%- macro test_case(case) -%}
@@ -30,7 +36,7 @@ class {{ exercise | camel_case }}Test(unittest.TestCase):
     {% set pattern = case['input']['pattern'] -%}
     {% set flags = case['input']['flags'] -%}
     {% set files = case['input']['files'] -%}
-    def test_{{ case["description"] | to_snake }}(self, mock_file, mock_open):
+    def test_{{ case["description"] | to_snake }}(self):
         self.assertMultiLineEqual(
             grep("{{ pattern }}", "{{ flags|join(" ") }}", {{ files }}),
             {% if expected == [] -%}
